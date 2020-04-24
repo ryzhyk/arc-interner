@@ -1,3 +1,5 @@
+![Rust](https://github.com/ryzhyk/arc-interner/workflows/Rust/badge.svg)
+
 # An interner that deallocates unused values.
 
 This crate is a fork of [David Roundy's](https://github.com/droundy/)
