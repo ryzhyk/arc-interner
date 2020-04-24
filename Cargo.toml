@@ -1,8 +1,14 @@
 [package]
 name = "arc-interner"
+description = "An interner that deallocates unused values"
+homepage = "https://github.com/ryzhyk/arc-interner"
 version = "0.1.0"
 authors = ["Leonid Ryzhyk <lryzhyk@vmware.com>"]
 edition = "2018"
+license = "MIT"
+repository = "https://github.com/ryzhyk/arc-interner"
+readme = "README.md"
+keywords = ["intern", "interner", "interning"]
 
 [dependencies]
 lazy_static = "1.4"
