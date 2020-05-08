@@ -4,7 +4,8 @@
 //! [`internment` crate](https://crates.io/crates/internment).
 //! It provides an alternative implementation of the `internment::ArcIntern`
 //! type.  It inherits David's high-level design and API; however it is built
-//! completely on Rust's standard `Arc` and `Mutex` types and does not contain
+//! completely on Rust's standard `Arc` and the
+//! [`dashmap` crate](https://crates.io/crates/dashmap) and does not contain
 //! any unsafe code.
 //!
 //! Interning reduces the memory footprint of an application by storing
@@ -28,15 +29,16 @@
 //!   some CPU and memory overhead (due to storing and maintaining an
 //!   atomic counter).
 //! - Multithreading.  A single pool of interned objects is shared by all
-//!   threads in the program.  This pool is protected by a mutex that is
-//!   acquired every time an object is being interned or a reference to
-//!   an interned object is being dropped.  Althgough Rust mutexes are fairly
-//!   cheap when there is no contention, you may see a significant drop in
-//!   performance under contention.
+//!   threads in the program.  Inside `DashMap` this pool is protected by
+//!   mutexes that are acquired every time an object is being interned or a
+//!   reference to an interned object is being dropped.  Although Rust mutexes
+//!   are fairly cheap when there is no contention, you may see a significant
+//!   drop in performance under contention.
 //! - Not just strings: this library allows interning any data type that
 //!   satisfies the `Eq + Hash + Send + Sync` trait bound.
-//! - Safe: this library is built on `Arc` and `Mutex` types from the Rust
-//!   standard library and does not contain any unsafe code.
+//! - Safe: this library is built on `Arc` type from the Rust
+//!   standard library and the [`dashmap` crate](https://crates.io/crates/dashmap)
+//!   and does not contain any unsafe code (although std and dashmap do of course)
 //!
 //! # Example
 //! ```rust
@@ -48,15 +50,14 @@
 //! assert_eq!(*x, "hello"); // dereference an ArcIntern like a pointer
 //! ```
 
+use dashmap::DashMap;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Borrow;
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 /// A pointer to a reference-counted interned object.
 ///
@@ -78,17 +79,17 @@ pub struct ArcIntern<T: Eq + Hash + Send + Sync + 'static> {
     arc: Arc<T>,
 }
 
-type Container<T> = Mutex<HashSet<Arc<T>>>;
+type Container<T> = DashMap<Arc<T>,()>;
 lazy_static! {
     static ref CONTAINER: state::Container = state::Container::new();
 }
 
 impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
-    fn get_mutex() -> &'static Container<T> {
+    fn get_state() -> &'static Container<T> {
         match CONTAINER.try_get::<Container<T>>() {
             Some(m) => m,
             None => {
-                CONTAINER.set::<Container<T>>(Mutex::new(HashSet::new()));
+                CONTAINER.set::<Container<T>>(DashMap::new());
                 CONTAINER.get::<Container<T>>()
             }
         }
@@ -99,23 +100,17 @@ impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
     /// previously allocated.
     ///
     /// Note that `ArcIntern::new` is a bit slow, since it needs to check
-    /// a `HashMap` protected by a `Mutex`.
+    /// a `DashMap` which contains its own mutexes.
     pub fn new(val: T) -> ArcIntern<T> {
-        let mymutex = Self::get_mutex();
-        let mut m = mymutex.lock().unwrap();
-        if let Some(b) = m.get(&val) {
-            return ArcIntern { arc: b.clone() };
-        }
-        let b = Arc::new(val);
-        let p = ArcIntern { arc: b.clone() };
-        m.insert(b);
-        p
+        let m = Self::get_state();
+        let b = m.entry(Arc::new(val)).or_insert(());
+        return ArcIntern { arc: b.key().clone() };
     }
     /// See how many objects have been interned.  This may be helpful
     /// in analyzing memory use.
     pub fn num_objects_interned() -> usize {
         if let Some(m) = CONTAINER.try_get::<Container<T>>() {
-            return m.lock().unwrap().len();
+            return m.len();
         }
         0
     }
@@ -137,13 +132,13 @@ impl<T: Eq + Hash + Send + Sync + 'static> Clone for ArcIntern<T> {
 
 impl<T: Eq + Hash + Send + Sync> Drop for ArcIntern<T> {
     fn drop(&mut self) {
-        let mut m = Self::get_mutex().lock().unwrap();
-        // If the reference count is 2, then the only two remaining references
-        // to this value are held by `self` and the hashmap and we can safely
-        // deallocate the value.
-        if Arc::strong_count(&self.arc) == 2 {
-            m.remove(&self.arc);
-        }
+        let m = Self::get_state();
+        m.remove_if(&self.arc, |k, _v| {
+            // If the reference count is 2, then the only two remaining references
+            // to this value are held by `self` and the hashmap and we can safely
+            // deallocate the value.
+            Arc::strong_count(&k) == 2
+        });
     }
 }
 

@@ -11,6 +11,7 @@ readme = "README.md"
 keywords = ["intern", "interner", "interning"]
 
 [dependencies]
+dashmap = "3.11"
 lazy_static = "1.4"
 serde = "1.0"
 state = "0.4"
