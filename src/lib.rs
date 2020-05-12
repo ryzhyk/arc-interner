@@ -272,6 +272,21 @@ mod tests {
     }
 
     #[derive(Eq, PartialEq, Hash)]
+    pub struct TestStruct2(String,u64);
+
+    #[test]
+    fn sequential() {
+        for _i in 0..10_000 {
+            let mut interned = Vec::with_capacity(100);
+            for j in 0..100 {
+                interned.push(ArcIntern::new(TestStruct2("foo".to_string(), j)));
+            }
+        }
+
+        assert_eq!(ArcIntern::<TestStruct2>::num_objects_interned(), 0);
+    }
+
+    #[derive(Eq, PartialEq, Hash)]
     pub struct TestStruct(String,u64);
 
     // Quickly create and destroy a small number of interned objects from
@@ -279,7 +294,7 @@ mod tests {
     #[test]
     fn multithreading1() {
         let mut thandles = vec![];
-        for _i in 0..3 {
+        for _i in 0..10 {
             thandles.push(thread::spawn(|| {
                 for _i in 0..100_000 {
                     let _interned1 = ArcIntern::new(TestStruct("foo".to_string(), 5));
