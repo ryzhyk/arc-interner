@@ -51,8 +51,9 @@
 //! ```
 
 use dashmap::DashMap;
-use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::any::{Any, TypeId};
 use std::borrow::Borrow;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
@@ -80,20 +81,10 @@ pub struct ArcIntern<T: Eq + Hash + Send + Sync + 'static> {
 }
 
 type Container<T> = DashMap<Arc<T>,()>;
-lazy_static! {
-    static ref CONTAINER: state::Container = state::Container::new();
-}
+
+static CONTAINER: OnceCell<DashMap<TypeId, Box<dyn Any + Send + Sync>>> = OnceCell::new();
 
 impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
-    fn get_state() -> &'static Container<T> {
-        match CONTAINER.try_get::<Container<T>>() {
-            Some(m) => m,
-            None => {
-                CONTAINER.set::<Container<T>>(DashMap::new());
-                CONTAINER.get::<Container<T>>()
-            }
-        }
-    }
     /// Intern a value.  If this value has not previously been
     /// interned, then `new` will allocate a spot for the value on the
     /// heap.  Otherwise, it will return a pointer to the object
@@ -102,15 +93,27 @@ impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
     /// Note that `ArcIntern::new` is a bit slow, since it needs to check
     /// a `DashMap` which contains its own mutexes.
     pub fn new(val: T) -> ArcIntern<T> {
-        let m = Self::get_state();
+        let type_map = CONTAINER.get_or_init(|| DashMap::new());
+
+        // Prefer taking the read lock to reduce contention, only use entry api if necessary.
+        let boxed = if let Some(boxed) = type_map.get(&TypeId::of::<T>()) {
+            boxed
+        } else {
+            type_map
+                .entry(TypeId::of::<T>())
+                .or_insert_with(|| Box::new(Container::<T>::new()))
+                .downgrade()
+        };
+
+        let m: &Container<T> = boxed.value().downcast_ref::<Container<T>>().unwrap();
         let b = m.entry(Arc::new(val)).or_insert(());
         return ArcIntern { arc: b.key().clone() };
     }
     /// See how many objects have been interned.  This may be helpful
     /// in analyzing memory use.
     pub fn num_objects_interned() -> usize {
-        if let Some(m) = CONTAINER.try_get::<Container<T>>() {
-            return m.len();
+        if let Some(m) = CONTAINER.get().and_then(|type_map| type_map.get(&TypeId::of::<T>())) {
+            return m.downcast_ref::<Container<T>>().unwrap().len();
         }
         0
     }
@@ -132,13 +135,15 @@ impl<T: Eq + Hash + Send + Sync + 'static> Clone for ArcIntern<T> {
 
 impl<T: Eq + Hash + Send + Sync> Drop for ArcIntern<T> {
     fn drop(&mut self) {
-        let m = Self::get_state();
-        m.remove_if(&self.arc, |k, _v| {
-            // If the reference count is 2, then the only two remaining references
-            // to this value are held by `self` and the hashmap and we can safely
-            // deallocate the value.
-            Arc::strong_count(&k) == 2
-        });
+        if let Some(m) = CONTAINER.get().and_then(|type_map| type_map.get(&TypeId::of::<T>())) {
+            let m: &Container<T> = m.downcast_ref::<Container<T>>().unwrap();
+            m.remove_if(&self.arc, |k, _v| {
+                // If the reference count is 2, then the only two remaining references
+                // to this value are held by `self` and the hashmap and we can safely
+                // deallocate the value.
+                Arc::strong_count(&k) == 2
+            });
+        }
     }
 }
 
