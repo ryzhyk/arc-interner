@@ -2,7 +2,7 @@
 name = "arc-interner"
 description = "An interner that deallocates unused values"
 homepage = "https://github.com/ryzhyk/arc-interner"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Leonid Ryzhyk <lryzhyk@vmware.com>"]
 edition = "2018"
 license = "MIT"
