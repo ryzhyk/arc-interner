@@ -241,6 +241,7 @@ impl<'de, T: Eq + Hash + Send + Sync + 'static + Deserialize<'de>> Deserialize<'
 #[cfg(test)]
 mod tests {
     use crate::ArcIntern;
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::thread;
 
@@ -306,8 +307,11 @@ mod tests {
                 let drop_check = drop_check.clone();
                 move || {
                     for _i in 0..100_000 {
-                        let _interned1 = ArcIntern::new(TestStruct("foo".to_string(), 5, drop_check.clone()));
+                        let interned1 = ArcIntern::new(TestStruct("foo".to_string(), 5, drop_check.clone()));
                         let _interned2 = ArcIntern::new(TestStruct("bar".to_string(), 10, drop_check.clone()));
+                        let mut m = HashMap::new();
+                        // force some hashing
+                        m.insert(interned1, ());
                     }
                 }
             });
