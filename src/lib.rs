@@ -188,7 +188,13 @@ impl<T: Eq + Hash + Send + Sync + Default + 'static> Default for ArcIntern<T> {
 /// hash of the pointer with hash of the data itself.
 impl<T: Eq + Hash + Send + Sync> Hash for ArcIntern<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        Arc::into_raw(self.arc.clone()).hash(state);
+        // The clone in this function makes the Arc::strong_count
+        // temporarily increase.  This does not break drop as count
+        // is already >2 if another thread is calling hash.
+        let raw = Arc::into_raw(self.arc.clone());
+        raw.hash(state);
+        // Don't leak increase of count from the clone() above
+        unsafe { Arc::from_raw(raw) };
     }
 }
 
@@ -241,6 +247,8 @@ impl<'de, T: Eq + Hash + Send + Sync + 'static + Deserialize<'de>> Deserialize<'
 #[cfg(test)]
 mod tests {
     use crate::ArcIntern;
+    use std::collections::HashMap;
+    use std::sync::Arc;
     use std::thread;
 
     // Test basic functionality.
@@ -292,25 +300,33 @@ mod tests {
     }
 
     #[derive(Eq, PartialEq, Hash)]
-    pub struct TestStruct(String,u64);
+    pub struct TestStruct(String, u64, Arc<bool>);
 
     // Quickly create and destroy a small number of interned objects from
     // multiple threads.
     #[test]
     fn multithreading1() {
         let mut thandles = vec![];
+        let drop_check = Arc::new(true);
         for _i in 0..10 {
-            thandles.push(thread::spawn(|| {
-                for _i in 0..100_000 {
-                    let _interned1 = ArcIntern::new(TestStruct("foo".to_string(), 5));
-                    let _interned2 = ArcIntern::new(TestStruct("bar".to_string(), 10));
+            let t = thread::spawn({
+                let drop_check = drop_check.clone();
+                move || {
+                    for _i in 0..100_000 {
+                        let interned1 = ArcIntern::new(TestStruct("foo".to_string(), 5, drop_check.clone()));
+                        let _interned2 = ArcIntern::new(TestStruct("bar".to_string(), 10, drop_check.clone()));
+                        let mut m = HashMap::new();
+                        // force some hashing
+                        m.insert(interned1, ());
+                    }
                 }
-            }));
+            });
+            thandles.push(t);
         }
         for h in thandles.into_iter() {
             h.join().unwrap()
         }
-
+        assert_eq!(Arc::strong_count(&drop_check), 1);
         assert_eq!(ArcIntern::<TestStruct>::num_objects_interned(), 0);
     }
 }
