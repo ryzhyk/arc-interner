@@ -188,13 +188,7 @@ impl<T: Eq + Hash + Send + Sync + Default + 'static> Default for ArcIntern<T> {
 /// hash of the pointer with hash of the data itself.
 impl<T: Eq + Hash + Send + Sync> Hash for ArcIntern<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // The clone in this function makes the Arc::strong_count
-        // temporarily increase.  This does not break drop as count
-        // is already >2 if another thread is calling hash.
-        let raw = Arc::into_raw(self.arc.clone());
-        raw.hash(state);
-        // Don't leak increase of count from the clone() above
-        unsafe { Arc::from_raw(raw) };
+        Arc::as_ptr(&self.arc).hash(state);
     }
 }
 
