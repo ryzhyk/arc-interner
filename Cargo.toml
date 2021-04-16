@@ -11,6 +11,6 @@ readme = "README.md"
 keywords = ["intern", "interner", "interning"]
 
 [dependencies]
-dashmap = "3.11"
+dashmap = "4.0.2"
 once_cell = "1.3"
 serde = "1.0"
