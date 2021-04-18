@@ -50,6 +50,7 @@
 //! assert_eq!(*x, "hello"); // dereference an ArcIntern like a pointer
 //! ```
 
+use ahash::RandomState;
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -80,9 +81,9 @@ pub struct ArcIntern<T: Eq + Hash + Send + Sync + 'static> {
     arc: Arc<T>,
 }
 
-type Container<T> = DashMap<Arc<T>,()>;
+type Container<T> = DashMap<Arc<T>, (), RandomState>;
 
-static CONTAINER: OnceCell<DashMap<TypeId, Box<dyn Any + Send + Sync>>> = OnceCell::new();
+static CONTAINER: OnceCell<DashMap<TypeId, Box<dyn Any + Send + Sync>, RandomState>> = OnceCell::new();
 
 impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
     /// Intern a value.  If this value has not previously been
@@ -93,7 +94,7 @@ impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
     /// Note that `ArcIntern::new` is a bit slow, since it needs to check
     /// a `DashMap` which contains its own mutexes.
     pub fn new(val: T) -> ArcIntern<T> {
-        let type_map = CONTAINER.get_or_init(|| DashMap::new());
+        let type_map = CONTAINER.get_or_init(|| DashMap::with_hasher(RandomState::new()));
 
         // Prefer taking the read lock to reduce contention, only use entry api if necessary.
         let boxed = if let Some(boxed) = type_map.get(&TypeId::of::<T>()) {
@@ -101,7 +102,7 @@ impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
         } else {
             type_map
                 .entry(TypeId::of::<T>())
-                .or_insert_with(|| Box::new(Container::<T>::new()))
+                .or_insert_with(|| Box::new(Container::<T>::with_hasher(RandomState::new())))
                 .downgrade()
         };
 
