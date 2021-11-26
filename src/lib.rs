@@ -142,7 +142,7 @@ impl<T: Eq + Hash + Send + Sync> Drop for ArcIntern<T> {
                 // If the reference count is 2, then the only two remaining references
                 // to this value are held by `self` and the hashmap and we can safely
                 // deallocate the value.
-                Arc::strong_count(&k) == 2
+                Arc::strong_count(k) == 2
             });
         }
     }
@@ -232,7 +232,7 @@ impl<'de, T: Eq + Hash + Send + Sync + 'static + Deserialize<'de>> Deserialize<'
     for ArcIntern<T>
 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        T::deserialize(deserializer).map(|x: T| Self::new(x))
+        T::deserialize(deserializer).map(Self::new)
     }
 }
 
