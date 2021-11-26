@@ -182,14 +182,11 @@ impl<T: Eq + Hash + Send + Sync + Default + 'static> Default for ArcIntern<T> {
     }
 }
 
-/// The hash implementation returns the hash of the pointer
-/// value, not the hash of the value pointed to.  This should
-/// be irrelevant, since there is a unique pointer for every
-/// value, but it *is* observable, since you could compare the
-/// hash of the pointer with hash of the data itself.
 impl<T: Eq + Hash + Send + Sync> Hash for ArcIntern<T> {
+    // `Hash` implementation must be equivalent for owned and borrowed values.
     fn hash<H: Hasher>(&self, state: &mut H) {
-        Arc::as_ptr(&self.arc).hash(state);
+        let borrow: &T = self.borrow();
+        borrow.hash(state);
     }
 }
 
