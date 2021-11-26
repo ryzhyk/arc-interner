@@ -83,7 +83,8 @@ pub struct ArcIntern<T: Eq + Hash + Send + Sync + 'static> {
 
 type Container<T> = DashMap<Arc<T>, (), RandomState>;
 
-static CONTAINER: OnceCell<DashMap<TypeId, Box<dyn Any + Send + Sync>, RandomState>> = OnceCell::new();
+static CONTAINER: OnceCell<DashMap<TypeId, Box<dyn Any + Send + Sync>, RandomState>> =
+    OnceCell::new();
 
 impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
     /// Intern a value.  If this value has not previously been
@@ -108,12 +109,17 @@ impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
 
         let m: &Container<T> = boxed.value().downcast_ref::<Container<T>>().unwrap();
         let b = m.entry(Arc::new(val)).or_insert(());
-        return ArcIntern { arc: b.key().clone() };
+        return ArcIntern {
+            arc: b.key().clone(),
+        };
     }
     /// See how many objects have been interned.  This may be helpful
     /// in analyzing memory use.
     pub fn num_objects_interned() -> usize {
-        if let Some(m) = CONTAINER.get().and_then(|type_map| type_map.get(&TypeId::of::<T>())) {
+        if let Some(m) = CONTAINER
+            .get()
+            .and_then(|type_map| type_map.get(&TypeId::of::<T>()))
+        {
             return m.downcast_ref::<Container<T>>().unwrap().len();
         }
         0
@@ -136,7 +142,10 @@ impl<T: Eq + Hash + Send + Sync + 'static> Clone for ArcIntern<T> {
 
 impl<T: Eq + Hash + Send + Sync> Drop for ArcIntern<T> {
     fn drop(&mut self) {
-        if let Some(m) = CONTAINER.get().and_then(|type_map| type_map.get(&TypeId::of::<T>())) {
+        if let Some(m) = CONTAINER
+            .get()
+            .and_then(|type_map| type_map.get(&TypeId::of::<T>()))
+        {
             let m: &Container<T> = m.downcast_ref::<Container<T>>().unwrap();
             m.remove_if(&self.arc, |k, _v| {
                 // If the reference count is 2, then the only two remaining references
@@ -270,14 +279,21 @@ mod tests {
     // Also tests `Display` implementation.
     #[test]
     fn sorting() {
-        let mut interned_vals = vec![ArcIntern::new(4), ArcIntern::new(2), ArcIntern::new(5), ArcIntern::new(0), ArcIntern::new(1), ArcIntern::new(3)];
+        let mut interned_vals = vec![
+            ArcIntern::new(4),
+            ArcIntern::new(2),
+            ArcIntern::new(5),
+            ArcIntern::new(0),
+            ArcIntern::new(1),
+            ArcIntern::new(3),
+        ];
         interned_vals.sort();
         let sorted: Vec<String> = interned_vals.iter().map(|v| format!("{}", v)).collect();
         assert_eq!(&sorted.join(","), "0,1,2,3,4,5");
     }
 
     #[derive(Eq, PartialEq, Hash)]
-    pub struct TestStruct2(String,u64);
+    pub struct TestStruct2(String, u64);
 
     #[test]
     fn sequential() {
@@ -305,8 +321,10 @@ mod tests {
                 let drop_check = drop_check.clone();
                 move || {
                     for _i in 0..100_000 {
-                        let interned1 = ArcIntern::new(TestStruct("foo".to_string(), 5, drop_check.clone()));
-                        let _interned2 = ArcIntern::new(TestStruct("bar".to_string(), 10, drop_check.clone()));
+                        let interned1 =
+                            ArcIntern::new(TestStruct("foo".to_string(), 5, drop_check.clone()));
+                        let _interned2 =
+                            ArcIntern::new(TestStruct("bar".to_string(), 10, drop_check.clone()));
                         let mut m = HashMap::new();
                         // force some hashing
                         m.insert(interned1, ());
