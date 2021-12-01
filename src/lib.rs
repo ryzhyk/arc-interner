@@ -77,7 +77,7 @@ use std::sync::Arc;
 /// assert_eq!(*x, "hello"); // dereference an ArcIntern like a pointer
 /// ```
 #[derive(Debug)]
-pub struct ArcIntern<T: Eq + Hash + Send + Sync + 'static> {
+pub struct ArcIntern<T: Eq + Hash + Send + Sync + 'static + ?Sized> {
     arc: Arc<T>,
 }
 
@@ -86,15 +86,8 @@ type Container<T> = DashMap<Arc<T>, (), RandomState>;
 static CONTAINER: OnceCell<DashMap<TypeId, Box<dyn Any + Send + Sync>, RandomState>> =
     OnceCell::new();
 
-impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
-    /// Intern a value.  If this value has not previously been
-    /// interned, then `new` will allocate a spot for the value on the
-    /// heap.  Otherwise, it will return a pointer to the object
-    /// previously allocated.
-    ///
-    /// Note that `ArcIntern::new` is a bit slow, since it needs to check
-    /// a `DashMap` which contains its own mutexes.
-    pub fn new(val: T) -> ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + 'static + ?Sized> ArcIntern<T> {
+    fn from_arc(val: Arc<T>) -> ArcIntern<T> {
         let type_map = CONTAINER.get_or_init(|| DashMap::with_hasher(RandomState::new()));
 
         // Prefer taking the read lock to reduce contention, only use entry api if necessary.
@@ -108,11 +101,12 @@ impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
         };
 
         let m: &Container<T> = boxed.value().downcast_ref::<Container<T>>().unwrap();
-        let b = m.entry(Arc::new(val)).or_insert(());
+        let b = m.entry(val).or_insert(());
         return ArcIntern {
             arc: b.key().clone(),
         };
     }
+
     /// See how many objects have been interned.  This may be helpful
     /// in analyzing memory use.
     pub fn num_objects_interned() -> usize {
@@ -132,7 +126,20 @@ impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
     }
 }
 
-impl<T: Eq + Hash + Send + Sync + 'static> Clone for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + 'static> ArcIntern<T> {
+    /// Intern a value.  If this value has not previously been
+    /// interned, then `new` will allocate a spot for the value on the
+    /// heap.  Otherwise, it will return a pointer to the object
+    /// previously allocated.
+    ///
+    /// Note that `ArcIntern::new` is a bit slow, since it needs to check
+    /// a `DashMap` which contains its own mutexes.
+    pub fn new(val: T) -> ArcIntern<T> {
+        Self::from_arc(Arc::new(val))
+    }
+}
+
+impl<T: Eq + Hash + Send + Sync + 'static + ?Sized> Clone for ArcIntern<T> {
     fn clone(&self) -> Self {
         ArcIntern {
             arc: self.arc.clone(),
@@ -140,7 +147,7 @@ impl<T: Eq + Hash + Send + Sync + 'static> Clone for ArcIntern<T> {
     }
 }
 
-impl<T: Eq + Hash + Send + Sync> Drop for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + ?Sized> Drop for ArcIntern<T> {
     fn drop(&mut self) {
         if let Some(m) = CONTAINER
             .get()
@@ -157,26 +164,42 @@ impl<T: Eq + Hash + Send + Sync> Drop for ArcIntern<T> {
     }
 }
 
-impl<T: Send + Sync + Hash + Eq> AsRef<T> for ArcIntern<T> {
+impl<T: Send + Sync + Hash + Eq + ?Sized> AsRef<T> for ArcIntern<T> {
     fn as_ref(&self) -> &T {
         self.arc.as_ref()
     }
 }
-impl<T: Eq + Hash + Send + Sync> Borrow<T> for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + ?Sized> Borrow<T> for ArcIntern<T> {
     fn borrow(&self) -> &T {
         self.as_ref()
     }
 }
-impl<T: Eq + Hash + Send + Sync> Deref for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + ?Sized> Deref for ArcIntern<T> {
     type Target = T;
     fn deref(&self) -> &T {
         self.as_ref()
     }
 }
 
-impl<T: Eq + Hash + Send + Sync + Display> Display for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + Display + ?Sized> Display for ArcIntern<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         self.deref().fmt(f)
+    }
+}
+
+impl<T: Eq + Hash + Send + Sync + 'static + ?Sized> From<Box<T>> for ArcIntern<T> {
+    fn from(b: Box<T>) -> Self {
+        Self::from_arc(Arc::from(b))
+    }
+}
+
+impl<'a, T> From<&'a T> for ArcIntern<T>
+where
+    T: Eq + Hash + Send + Sync + 'static + ?Sized,
+    Arc<T>: From<&'a T>,
+{
+    fn from(t: &'a T) -> Self {
+        Self::from_arc(Arc::from(t))
     }
 }
 
@@ -185,13 +208,13 @@ impl<T: Eq + Hash + Send + Sync + 'static> From<T> for ArcIntern<T> {
         ArcIntern::new(t)
     }
 }
-impl<T: Eq + Hash + Send + Sync + Default + 'static> Default for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + Default + 'static + ?Sized> Default for ArcIntern<T> {
     fn default() -> ArcIntern<T> {
         ArcIntern::new(Default::default())
     }
 }
 
-impl<T: Eq + Hash + Send + Sync> Hash for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + ?Sized> Hash for ArcIntern<T> {
     // `Hash` implementation must be equivalent for owned and borrowed values.
     fn hash<H: Hasher>(&self, state: &mut H) {
         let borrow: &T = self.borrow();
@@ -200,14 +223,14 @@ impl<T: Eq + Hash + Send + Sync> Hash for ArcIntern<T> {
 }
 
 /// Efficiently compares two interned values by comparing their pointers.
-impl<T: Eq + Hash + Send + Sync> PartialEq for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + ?Sized> PartialEq for ArcIntern<T> {
     fn eq(&self, other: &ArcIntern<T>) -> bool {
         Arc::ptr_eq(&self.arc, &other.arc)
     }
 }
-impl<T: Eq + Hash + Send + Sync> Eq for ArcIntern<T> {}
+impl<T: Eq + Hash + Send + Sync + ?Sized> Eq for ArcIntern<T> {}
 
-impl<T: Eq + Hash + Send + Sync + PartialOrd> PartialOrd for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + PartialOrd + ?Sized> PartialOrd for ArcIntern<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.as_ref().partial_cmp(other)
     }
@@ -225,19 +248,19 @@ impl<T: Eq + Hash + Send + Sync + PartialOrd> PartialOrd for ArcIntern<T> {
     }
 }
 
-impl<T: Eq + Hash + Send + Sync + Ord> Ord for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + Ord + ?Sized> Ord for ArcIntern<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.as_ref().cmp(other)
     }
 }
 
-impl<T: Eq + Hash + Send + Sync + Serialize> Serialize for ArcIntern<T> {
+impl<T: Eq + Hash + Send + Sync + Serialize + ?Sized> Serialize for ArcIntern<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.as_ref().serialize(serializer)
     }
 }
 
-impl<'de, T: Eq + Hash + Send + Sync + 'static + Deserialize<'de>> Deserialize<'de>
+impl<'de, T: Eq + Hash + Send + Sync + 'static + ?Sized + Deserialize<'de>> Deserialize<'de>
     for ArcIntern<T>
 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -257,7 +280,7 @@ mod tests {
     fn basic() {
         assert_eq!(ArcIntern::new("foo"), ArcIntern::new("foo"));
         assert_ne!(ArcIntern::new("foo"), ArcIntern::new("bar"));
-        // The above refs should be deallocate by now.
+        // The above refs should be deallocated by now.
         assert_eq!(ArcIntern::<&str>::num_objects_interned(), 0);
 
         let _interned1 = ArcIntern::new("foo".to_string());
@@ -338,5 +361,19 @@ mod tests {
         }
         assert_eq!(Arc::strong_count(&drop_check), 1);
         assert_eq!(ArcIntern::<TestStruct>::num_objects_interned(), 0);
+    }
+
+    #[test]
+    fn test_unsized() {
+        assert_eq!(
+            ArcIntern::<[usize]>::from(&[1, 2, 3][..]),
+            ArcIntern::from(&[1, 2, 3][..])
+        );
+        assert_ne!(
+            ArcIntern::<[usize]>::from(&[1, 2][..]),
+            ArcIntern::from(&[1, 2, 3][..])
+        );
+        // The above refs should be deallocated by now.
+        assert_eq!(ArcIntern::<[usize]>::num_objects_interned(), 0);
     }
 }
