@@ -11,7 +11,7 @@ readme = "README.md"
 keywords = ["intern", "interner", "interning"]
 
 [dependencies]
-ahash = "0.3.8"
+ahash = "0.8.5"
 dashmap = "4.0.2"
 once_cell = "1.3"
 serde = "1.0"
