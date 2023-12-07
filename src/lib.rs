@@ -149,18 +149,21 @@ impl<T: Eq + Hash + Send + Sync + 'static + ?Sized> Clone for ArcIntern<T> {
 
 impl<T: Eq + Hash + Send + Sync + ?Sized> Drop for ArcIntern<T> {
     fn drop(&mut self) {
-        if let Some(m) = CONTAINER
-            .get()
-            .and_then(|type_map| type_map.get(&TypeId::of::<T>()))
-        {
-            let m: &Container<T> = m.downcast_ref::<Container<T>>().unwrap();
-            m.remove_if(&self.arc, |k, _v| {
-                // If the reference count is 2, then the only two remaining references
-                // to this value are held by `self` and the hashmap and we can safely
-                // deallocate the value.
-                Arc::strong_count(k) == 2
-            });
-        }
+        // If the reference count is 2, then the only two remaining references
+        // to this value are held by `self` and the hashmap and we can safely
+        // deallocate the value.
+        let cached_value = if Arc::strong_count(&self.arc) == 2 && Arc::weak_count(&self.arc) == 0 {
+            CONTAINER
+                .get()
+                .and_then(|type_map| type_map.get(&TypeId::of::<T>()))
+                .and_then(|any_map| {
+                    let m: &Container<T> = any_map.downcast_ref::<Container<T>>().unwrap();
+                    m.remove(&self.arc)
+                })
+        } else {
+            None
+        };
+        drop(cached_value);
     }
 }
 
